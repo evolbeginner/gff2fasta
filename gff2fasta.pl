@@ -105,6 +105,7 @@ my $downstream=$global_options->{'downstream'};
 my %global_gff_orfs = ();
 my %global_gff_non_orfs = ();
 my %global_lengths = ();
+my %attributes_frame;
 my $global_reject_length = overrideDefault(50,'length');
 my $global_keep_non_orfs = overrideDefault(0, 'non_orfs');
 my $global_protein_code =  overrideDefault(0,'protein');
@@ -126,11 +127,8 @@ while(<$gff_fh>){
         undef, $strand, $frame, $attributes) = split /\t/;
 
     # SSW
-=cut=
-    if ($frame == 0){
-        ;
-    }
-    elsif ($frame == 1 or $frame == 2){
+    if (not exists $attributes_frame{$attributes}){
+        $attributes_frame{$attributes} = "";
         if($strand == "+"){
             $start = $start + $frame;
         }
@@ -138,7 +136,7 @@ while(<$gff_fh>){
             $end = $end - $frame;
         }
     }
-=cut
+    # SSW
 
     if ($start =~ /[<>]/ or $end =~ /[<>]/){
         if ((not exists $global_options->{'with_ambiguous_start'}) and (not exists $global_options->{'with_ambiguous_end'})){
@@ -226,7 +224,7 @@ while(my $sobj = $seqio->next_seq)
                     $combined_info{$ID}{'strand'} = $strand;
                     if (defined $combined_seq){
                         push @{$combined_info{$ID}{'seqs'}}, $combined_seq;
-                        push @{$combined_info{$ID}{'seq_starts'}},$start;
+                        push @{$combined_info{$ID}{'seq_starts'}}, $start;
                     }
                     $combined_info{$ID}{'attributes'}=$attributes_href;
                 }
@@ -251,15 +249,35 @@ while(my $sobj = $seqio->next_seq)
             my $title = join ("|", map {$href->{'attributes'}{$_} if exists $attributes_included{$_}} keys %{$href->{'attributes'}});
             if (exists $href->{'seqs'}){
                 my @starts = @{$href->{'seq_starts'}};
-                for my $index (sort {$starts[$a]<=>$starts[$b]} 0..$#starts){
+                #for my $index (sort {$starts[$a]<=>$starts[$b]} 0..$#starts){
+                my @ori_starts = @starts;
+                @starts = sort {$a<=>$b} @starts;
+                my %start_posi;
+                for my $i (0..$#ori_starts){
+                    my $start_2 = $ori_starts[$i];
+                    my ( $j )= grep { $starts[$_] eq $start_2 } 0..$#starts;
+                    $start_posi{$j} = $i;
+                }
+                $start_posi{-1} = $start_posi{$#starts};
+
+                for my $index (0..$#starts){
+                    #print join("\t", $index, $starts[$index])."\n";
                     given($href->{'strand'}){
                         when ('+'){
                             $href->{'seq'} .= $href->{'seqs'}->[$index];
-                            $href->{'first_seq'} = $href->{'seqs'}->[0];
+                            my $index;
+                            $index = 0 if defined($upstream);
+                            $index = -1 if defined($downstream);
+                            my $index2 = $start_posi{$index};
+                            $href->{'first_seq'} = $href->{'seqs'}->[$index2];
                         }
                         when ('-'){
                             $href->{'seq'} = $href->{'seqs'}->[$index] . $href->{'seq'};
-                            $href->{'first_seq'} = $href->{'seqs'}->[-1];
+                            my $index;
+                            $index = -1 if defined($upstream);
+                            $index = 0 if defined($downstream);
+                            my $index2 = $start_posi{$index};
+                            $href->{'first_seq'} = $href->{'seqs'}->[$index2];
                         }
                     }
                 }
@@ -296,6 +314,7 @@ sub revcompl {
     $seq =~ tr/ACGTacgt/TGCAtgca/;
     return scalar reverse $seq;
 }
+
 
 sub fasta_cut {
     #-----
@@ -343,15 +362,15 @@ sub checkParams {
 	"length"=>50,
     );
     GetOptions ( "help|h+"	        =>	\$options{'help'},
-	         "gff|g:s"	        =>	\$options{'gff'},
-		 "fasta|f=s"	        =>      \@genomes,
-	         "out|o:s"	        =>	\$options{'out'},
-	         "protein|p:i"	        =>	\$options{'protein'},
-	         "length|l:i"	        =>	\$options{'length'},
-	         "wrap|w:i"	        =>	\$options{'wrap'},
-	         "non_orfs+"	        =>	\$options{'non_orfs'},
-	         "include_nulls+"       =>	\$options{'include_nulls'},
-	         "seq-desc|d"	        =>	\$options{'seq-desc'},
+         "gff|g:s"  	        =>	\$options{'gff'},
+		 "fasta|f=s"	        =>  \@genomes,
+         "out|o:s"	            =>	\$options{'out'},
+         "protein|p:i"	        =>	\$options{'protein'},
+         "length|l:i"	        =>	\$options{'length'},
+         "wrap|w:i"	            =>	\$options{'wrap'},
+         "non_orfs+"	        =>	\$options{'non_orfs'},
+         "include_nulls+"       =>	\$options{'include_nulls'},
+         "seq-desc|d"	        =>	\$options{'seq-desc'},
 		 "feature=s"	        =>	\@features,
 		 "attributes=s"	        =>	\$options{'attributes'},
 		 "upstream=s"	        =>	\$options{'upstream'},
@@ -360,9 +379,9 @@ sub checkParams {
 		 "combine_exons!"       =>	\$options{'combine_exons'},
 		 "first_feature!"       =>	\$options{'first_feature'},
 		 "no_process_seqid!"    =>	\$options{'no_process_seqid'},
-                 "with_ambiguous_posi!" =>      \$options{'with_ambiguous_posi'},
-                 "with_ambiguous_start!"=>      \$options{'with_ambiguous_start'},
-                 "with_ambiguous_end!"  =>      \$options{'with_ambiguous_end'},
+         "with_ambiguous_posi!" =>  \$options{'with_ambiguous_posi'},
+         "with_ambiguous_start!"=>  \$options{'with_ambiguous_start'},
+         "with_ambiguous_end!"  =>  \$options{'with_ambiguous_end'},
 	         ) || die "illegal params!";
     map{delete $options{$_} if ! $options{$_}} keys %options;
     @{$options{'feature'}}{@features} = (1) x scalar(@features);
@@ -604,7 +623,7 @@ __DATA__
       [-non_orfs]                  Process non-ORF regions [default: false]
       [-include_nulls]             Transparently write through contigs with no genes [default: false] 
       [-seq-desc|d]                Use either ID or Alias attributes of GFF file as sequence identifiers
-      [-feature|fe gene]           Print fasta for only mentioned features. Example: gene or CDS or exon etc...
+      [-feature]           Print fasta for only mentioned features. Example: gene or CDS or exon etc...
       [-wrap -w LEN]               Line wrap at LEN chars [default: 80] Set to 0 for no wrap
       [-length -l LENGTH]          Reject any orfs shorter than this length [default: 50]
       [-help -h]                   Displays basic usage information
